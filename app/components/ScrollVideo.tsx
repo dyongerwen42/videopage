@@ -77,11 +77,10 @@ export default function ScrollVideo() {
         src="/video/bg.mp4"
         muted
         playsInline
-        // @ts-expect-error iOS attr
-        webkit-playsinline="true"
         preload="auto"
         loop
         disablePictureInPicture
+        {...({ "webkit-playsinline": "true" } as Record<string, string>)}
         className="absolute inset-0 w-full h-full object-cover object-center"
       />
     </div>
