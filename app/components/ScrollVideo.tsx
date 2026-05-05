@@ -16,16 +16,20 @@ export default function ScrollVideo() {
   const currentRef = useRef(0);
   const rafRef = useRef<number | null>(null);
   const [progress, setProgress] = useState(0);
+  const [posterMobile, setPosterMobile] = useState<boolean | null>(null);
 
   useEffect(() => {
     const mobile =
       window.matchMedia("(max-width: 768px)").matches ||
       /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+    setPosterMobile(mobile);
 
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext("2d");
+    const ctx = canvas.getContext("2d", { alpha: false });
     if (!ctx) return;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
 
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const resize = () => {
@@ -135,6 +139,14 @@ export default function ScrollVideo() {
 
   return (
     <div className="fixed inset-0 -z-10 bg-black overflow-hidden">
+      {posterMobile !== null && (
+        <img
+          src={`/${posterMobile ? "frames-sm" : "frames"}/poster.jpg`}
+          alt=""
+          aria-hidden
+          className="absolute inset-0 w-full h-full object-cover object-center"
+        />
+      )}
       <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" />
       <div className="absolute inset-0 bg-black/40 pointer-events-none" />
       {progress < 1 && (
