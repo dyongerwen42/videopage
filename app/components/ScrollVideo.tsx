@@ -2,110 +2,149 @@
 
 import { useEffect, useRef, useState } from "react";
 
+const FRAME_COUNT = 180;
+
+function frameUrl(i: number, mobile: boolean) {
+  const n = String(i).padStart(3, "0");
+  return `/${mobile ? "frames-sm" : "frames"}/f_${n}.jpg`;
+}
+
 export default function ScrollVideo() {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const targetTimeRef = useRef(0);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const imagesRef = useRef<HTMLImageElement[]>([]);
+  const targetRef = useRef(0);
+  const currentRef = useRef(0);
   const rafRef = useRef<number | null>(null);
-  const [src, setSrc] = useState<string>("/video/bg.mp4");
-  const [ready, setReady] = useState(false);
+  const [progress, setProgress] = useState(0);
 
   useEffect(() => {
-    let cancelled = false;
-    let createdUrl: string | null = null;
-    fetch("/video/bg.mp4")
-      .then((r) => r.blob())
-      .then((b) => {
-        if (cancelled) return;
-        createdUrl = URL.createObjectURL(b);
-        setSrc(createdUrl);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-      if (createdUrl) URL.revokeObjectURL(createdUrl);
+    const mobile =
+      window.matchMedia("(max-width: 768px)").matches ||
+      /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const resize = () => {
+      canvas.width = window.innerWidth * dpr;
+      canvas.height = window.innerHeight * dpr;
+      canvas.style.width = window.innerWidth + "px";
+      canvas.style.height = window.innerHeight + "px";
+      draw(currentRef.current);
     };
-  }, []);
 
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video) return;
-
-    const unlock = () => {
-      video.play().then(() => video.pause()).catch(() => {});
-      window.removeEventListener("touchstart", unlock);
-      window.removeEventListener("click", unlock);
+    const drawFrame = (img: HTMLImageElement) => {
+      const cw = canvas.width;
+      const ch = canvas.height;
+      const iw = img.naturalWidth;
+      const ih = img.naturalHeight;
+      if (!iw || !ih) return;
+      const scale = Math.max(cw / iw, ch / ih);
+      const w = iw * scale;
+      const h = ih * scale;
+      const x = (cw - w) / 2;
+      const y = (ch - h) / 2;
+      ctx.drawImage(img, x, y, w, h);
     };
-    window.addEventListener("touchstart", unlock, { once: true, passive: true });
-    window.addEventListener("click", unlock, { once: true });
 
-    const tick = () => {
-      const v = videoRef.current;
-      if (!v || !v.duration || isNaN(v.duration)) {
-        rafRef.current = requestAnimationFrame(tick);
-        return;
+    const draw = (idx: number) => {
+      const i = Math.max(0, Math.min(FRAME_COUNT - 1, Math.round(idx)));
+      const img = imagesRef.current[i];
+      if (img && img.complete && img.naturalWidth > 0) {
+        drawFrame(img);
+      } else {
+        for (let d = 1; d < 10; d++) {
+          const a = imagesRef.current[i - d];
+          if (a && a.complete && a.naturalWidth > 0) {
+            drawFrame(a);
+            return;
+          }
+          const b = imagesRef.current[i + d];
+          if (b && b.complete && b.naturalWidth > 0) {
+            drawFrame(b);
+            return;
+          }
+        }
       }
-      const current = v.currentTime;
-      const target = targetTimeRef.current;
-      const diff = target - current;
-      if (Math.abs(diff) > 0.02) {
-        try {
-          v.currentTime = current + diff * 0.15;
-        } catch {}
-      }
-      rafRef.current = requestAnimationFrame(tick);
     };
+
+    let loaded = 0;
+    imagesRef.current = new Array(FRAME_COUNT);
+    const loadFrame = (i: number) =>
+      new Promise<void>((res) => {
+        const img = new Image();
+        img.decoding = "async";
+        img.onload = () => {
+          loaded++;
+          setProgress(loaded / FRAME_COUNT);
+          if (i === 0) draw(0);
+          res();
+        };
+        img.onerror = () => {
+          loaded++;
+          setProgress(loaded / FRAME_COUNT);
+          res();
+        };
+        img.src = frameUrl(i, mobile);
+        imagesRef.current[i] = img;
+      });
+
+    (async () => {
+      await loadFrame(0);
+      const concurrency = mobile ? 4 : 8;
+      let next = 1;
+      const workers = Array.from({ length: concurrency }, async () => {
+        while (next < FRAME_COUNT) {
+          const idx = next++;
+          await loadFrame(idx);
+        }
+      });
+      await Promise.all(workers);
+    })();
 
     const onScroll = () => {
-      const v = videoRef.current;
-      if (!v || !v.duration || isNaN(v.duration)) return;
-      const scrollTop = window.scrollY || window.pageYOffset;
       const max = document.documentElement.scrollHeight - window.innerHeight;
-      const progress = max > 0 ? Math.min(1, Math.max(0, scrollTop / max)) : 0;
-      targetTimeRef.current = progress * v.duration;
+      const p = max > 0 ? Math.min(1, Math.max(0, window.scrollY / max)) : 0;
+      targetRef.current = p * (FRAME_COUNT - 1);
     };
 
-    const onLoaded = () => {
-      setReady(true);
-      onScroll();
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    const tick = () => {
+      const diff = targetRef.current - currentRef.current;
+      if (Math.abs(diff) > 0.05) {
+        currentRef.current += diff * 0.18;
+        draw(currentRef.current);
+      }
       rafRef.current = requestAnimationFrame(tick);
     };
 
-    if (video.readyState >= 1 && video.duration) onLoaded();
-    video.addEventListener("loadedmetadata", onLoaded);
-    video.addEventListener("canplay", onLoaded);
+    resize();
+    onScroll();
+    rafRef.current = requestAnimationFrame(tick);
     window.addEventListener("scroll", onScroll, { passive: true });
-    window.addEventListener("resize", onScroll);
+    window.addEventListener("resize", resize);
 
     return () => {
       window.removeEventListener("scroll", onScroll);
-      window.removeEventListener("resize", onScroll);
-      window.removeEventListener("touchstart", unlock);
-      window.removeEventListener("click", unlock);
-      video.removeEventListener("loadedmetadata", onLoaded);
-      video.removeEventListener("canplay", onLoaded);
+      window.removeEventListener("resize", resize);
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
     };
-  }, [src]);
+  }, []);
 
   return (
     <div className="fixed inset-0 -z-10 bg-black overflow-hidden">
-      <video
-        ref={videoRef}
-        src={src}
-        muted
-        playsInline
-        // @ts-expect-error - iOS-specific attribute
-        webkit-playsinline="true"
-        preload="auto"
-        autoPlay
-        disablePictureInPicture
-        crossOrigin="anonymous"
-        className={`absolute inset-0 w-full h-full object-cover object-center transition-opacity duration-500 ${
-          ready ? "opacity-100" : "opacity-0"
-        }`}
-      />
-      <div className="absolute inset-0 bg-black/40" />
+      <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" />
+      <div className="absolute inset-0 bg-black/40 pointer-events-none" />
+      {progress < 1 && (
+        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 w-40 h-[2px] bg-white/20 overflow-hidden">
+          <div
+            className="h-full bg-white/80 transition-[width] duration-150"
+            style={{ width: `${Math.round(progress * 100)}%` }}
+          />
+        </div>
+      )}
     </div>
   );
 }
