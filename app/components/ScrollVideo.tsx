@@ -83,6 +83,7 @@ export default function ScrollVideo() {
         {...({ "webkit-playsinline": "true" } as Record<string, string>)}
         className="absolute inset-0 w-full h-full object-cover object-center"
       />
+      <div className="absolute inset-0 bg-black/45 pointer-events-none" />
     </div>
   );
 }
