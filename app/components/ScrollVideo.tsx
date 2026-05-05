@@ -113,13 +113,16 @@ export default function ScrollVideo() {
       const max = document.documentElement.scrollHeight - window.innerHeight;
       const p = max > 0 ? Math.min(1, Math.max(0, window.scrollY / max)) : 0;
       targetRef.current = p * (FRAME_COUNT - 1);
+      if (mobile) {
+        currentRef.current = targetRef.current;
+        draw(targetRef.current);
+      }
     };
 
-    const lerp = mobile ? 0.35 : 0.18;
     const tick = () => {
       const diff = targetRef.current - currentRef.current;
       if (Math.abs(diff) > 0.05) {
-        currentRef.current += diff * lerp;
+        currentRef.current += diff * 0.18;
         draw(currentRef.current);
       }
       rafRef.current = requestAnimationFrame(tick);
@@ -127,7 +130,7 @@ export default function ScrollVideo() {
 
     resize();
     onScroll();
-    rafRef.current = requestAnimationFrame(tick);
+    if (!mobile) rafRef.current = requestAnimationFrame(tick);
     window.addEventListener("scroll", onScroll, { passive: true });
     window.addEventListener("resize", resize);
 
