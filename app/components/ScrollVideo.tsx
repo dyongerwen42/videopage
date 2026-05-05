@@ -2,10 +2,11 @@
 
 import { useEffect, useRef, useState } from "react";
 
-const FRAME_COUNT = 180;
+const DESKTOP_FRAMES = 180;
+const MOBILE_FRAMES = 120;
 
 function frameUrl(i: number, mobile: boolean) {
-  const n = String(i).padStart(3, "0");
+  const n = String(i + 1).padStart(3, "0");
   return `/${mobile ? "frames-sm" : "frames"}/f_${n}.jpg`;
 }
 
@@ -16,22 +17,21 @@ export default function ScrollVideo() {
   const currentRef = useRef(0);
   const rafRef = useRef<number | null>(null);
   const [progress, setProgress] = useState(0);
-  const [posterMobile, setPosterMobile] = useState<boolean | null>(null);
 
   useEffect(() => {
     const mobile =
       window.matchMedia("(max-width: 768px)").matches ||
       /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-    setPosterMobile(mobile);
+    const FRAME_COUNT = mobile ? MOBILE_FRAMES : DESKTOP_FRAMES;
 
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext("2d", { alpha: false });
+    const ctx = canvas.getContext("2d", { alpha: true });
     if (!ctx) return;
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = "high";
 
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const dpr = mobile ? 1 : Math.min(window.devicePixelRatio || 1, 2);
     const resize = () => {
       canvas.width = window.innerWidth * dpr;
       canvas.height = window.innerHeight * dpr;
@@ -115,10 +115,11 @@ export default function ScrollVideo() {
       targetRef.current = p * (FRAME_COUNT - 1);
     };
 
+    const lerp = mobile ? 0.35 : 0.18;
     const tick = () => {
       const diff = targetRef.current - currentRef.current;
       if (Math.abs(diff) > 0.05) {
-        currentRef.current += diff * 0.18;
+        currentRef.current += diff * lerp;
         draw(currentRef.current);
       }
       rafRef.current = requestAnimationFrame(tick);
@@ -139,14 +140,16 @@ export default function ScrollVideo() {
 
   return (
     <div className="fixed inset-0 -z-10 bg-black overflow-hidden">
-      {posterMobile !== null && (
+      <picture>
+        <source media="(max-width: 768px)" srcSet="/frames-sm/poster.jpg" />
         <img
-          src={`/${posterMobile ? "frames-sm" : "frames"}/poster.jpg`}
+          src="/frames/poster.jpg"
           alt=""
           aria-hidden
+          fetchPriority="high"
           className="absolute inset-0 w-full h-full object-cover object-center"
         />
-      )}
+      </picture>
       <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" />
       <div className="absolute inset-0 bg-black/40 pointer-events-none" />
       {progress < 1 && (
