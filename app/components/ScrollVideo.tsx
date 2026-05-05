@@ -154,7 +154,6 @@ export default function ScrollVideo() {
         />
       </picture>
       <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" />
-      <div className="absolute inset-0 bg-black/40 pointer-events-none" />
       {progress < 1 && (
         <div className="absolute bottom-6 left-1/2 -translate-x-1/2 w-40 h-[2px] bg-white/20 overflow-hidden">
           <div
