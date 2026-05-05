@@ -10,11 +10,13 @@ function frameUrl(i: number, mobile: boolean) {
   return `/${mobile ? "frames-sm" : "frames"}/f_${n}.jpg`;
 }
 
+type Frame = HTMLImageElement | ImageBitmap;
+
 export default function ScrollVideo() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const imagesRef = useRef<HTMLImageElement[]>([]);
+  const framesRef = useRef<(Frame | undefined)[]>([]);
   const targetRef = useRef(0);
-  const currentRef = useRef(0);
+  const drawnRef = useRef(-1);
   const rafRef = useRef<number | null>(null);
   const [progress, setProgress] = useState(0);
 
@@ -29,76 +31,86 @@ export default function ScrollVideo() {
     const ctx = canvas.getContext("2d", { alpha: true });
     if (!ctx) return;
     ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = "high";
+    ctx.imageSmoothingQuality = mobile ? "low" : "high";
 
     const dpr = mobile ? 1 : Math.min(window.devicePixelRatio || 1, 2);
     const resize = () => {
-      canvas.width = window.innerWidth * dpr;
-      canvas.height = window.innerHeight * dpr;
+      canvas.width = Math.round(window.innerWidth * dpr);
+      canvas.height = Math.round(window.innerHeight * dpr);
       canvas.style.width = window.innerWidth + "px";
       canvas.style.height = window.innerHeight + "px";
-      draw(currentRef.current);
+      drawnRef.current = -1;
+      drawAt(targetRef.current);
     };
 
-    const drawFrame = (img: HTMLImageElement) => {
+    const drawFrame = (frame: Frame) => {
       const cw = canvas.width;
       const ch = canvas.height;
-      const iw = img.naturalWidth;
-      const ih = img.naturalHeight;
+      const iw = (frame as HTMLImageElement).naturalWidth || (frame as ImageBitmap).width;
+      const ih = (frame as HTMLImageElement).naturalHeight || (frame as ImageBitmap).height;
       if (!iw || !ih) return;
       const scale = Math.max(cw / iw, ch / ih);
       const w = iw * scale;
       const h = ih * scale;
       const x = (cw - w) / 2;
       const y = (ch - h) / 2;
-      ctx.drawImage(img, x, y, w, h);
+      ctx.drawImage(frame as CanvasImageSource, x, y, w, h);
     };
 
-    const draw = (idx: number) => {
-      const i = Math.max(0, Math.min(FRAME_COUNT - 1, Math.round(idx)));
-      const img = imagesRef.current[i];
-      if (img && img.complete && img.naturalWidth > 0) {
-        drawFrame(img);
-      } else {
-        for (let d = 1; d < 10; d++) {
-          const a = imagesRef.current[i - d];
-          if (a && a.complete && a.naturalWidth > 0) {
-            drawFrame(a);
-            return;
-          }
-          const b = imagesRef.current[i + d];
-          if (b && b.complete && b.naturalWidth > 0) {
-            drawFrame(b);
-            return;
-          }
-        }
+    const findClosest = (i: number): Frame | null => {
+      const exact = framesRef.current[i];
+      if (exact) return exact;
+      for (let d = 1; d < 20; d++) {
+        const a = framesRef.current[i - d];
+        if (a) return a;
+        const b = framesRef.current[i + d];
+        if (b) return b;
       }
+      return null;
     };
 
+    const drawAt = (idx: number) => {
+      const i = Math.max(0, Math.min(FRAME_COUNT - 1, Math.round(idx)));
+      if (i === drawnRef.current) return;
+      const frame = findClosest(i);
+      if (!frame) return;
+      drawFrame(frame);
+      drawnRef.current = i;
+    };
+
+    const supportsBitmap = typeof createImageBitmap === "function";
+
+    framesRef.current = new Array(FRAME_COUNT);
     let loaded = 0;
-    imagesRef.current = new Array(FRAME_COUNT);
-    const loadFrame = (i: number) =>
-      new Promise<void>((res) => {
-        const img = new Image();
-        img.decoding = "async";
-        img.onload = () => {
-          loaded++;
-          setProgress(loaded / FRAME_COUNT);
-          if (i === 0) draw(0);
-          res();
-        };
-        img.onerror = () => {
-          loaded++;
-          setProgress(loaded / FRAME_COUNT);
-          res();
-        };
-        img.src = frameUrl(i, mobile);
-        imagesRef.current[i] = img;
-      });
+
+    const loadFrame = async (i: number) => {
+      try {
+        if (supportsBitmap) {
+          const res = await fetch(frameUrl(i, mobile));
+          const blob = await res.blob();
+          const bmp = await createImageBitmap(blob);
+          framesRef.current[i] = bmp;
+        } else {
+          await new Promise<void>((res) => {
+            const img = new Image();
+            img.decoding = "async";
+            img.onload = () => {
+              framesRef.current[i] = img;
+              res();
+            };
+            img.onerror = () => res();
+            img.src = frameUrl(i, mobile);
+          });
+        }
+      } catch {}
+      loaded++;
+      setProgress(loaded / FRAME_COUNT);
+      if (i === 0) drawAt(0);
+    };
 
     (async () => {
       await loadFrame(0);
-      const concurrency = mobile ? 4 : 8;
+      const concurrency = mobile ? 3 : 6;
       let next = 1;
       const workers = Array.from({ length: concurrency }, async () => {
         while (next < FRAME_COUNT) {
@@ -113,24 +125,16 @@ export default function ScrollVideo() {
       const max = document.documentElement.scrollHeight - window.innerHeight;
       const p = max > 0 ? Math.min(1, Math.max(0, window.scrollY / max)) : 0;
       targetRef.current = p * (FRAME_COUNT - 1);
-      if (mobile) {
-        currentRef.current = targetRef.current;
-        draw(targetRef.current);
-      }
     };
 
     const tick = () => {
-      const diff = targetRef.current - currentRef.current;
-      if (Math.abs(diff) > 0.05) {
-        currentRef.current += diff * 0.18;
-        draw(currentRef.current);
-      }
+      drawAt(targetRef.current);
       rafRef.current = requestAnimationFrame(tick);
     };
 
     resize();
     onScroll();
-    if (!mobile) rafRef.current = requestAnimationFrame(tick);
+    rafRef.current = requestAnimationFrame(tick);
     window.addEventListener("scroll", onScroll, { passive: true });
     window.addEventListener("resize", resize);
 
@@ -138,6 +142,9 @@ export default function ScrollVideo() {
       window.removeEventListener("scroll", onScroll);
       window.removeEventListener("resize", resize);
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      framesRef.current.forEach((f) => {
+        if (f && "close" in f) (f as ImageBitmap).close();
+      });
     };
   }, []);
 
