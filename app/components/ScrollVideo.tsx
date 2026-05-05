@@ -6,57 +6,50 @@ export default function ScrollVideo() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const targetTimeRef = useRef(0);
   const rafRef = useRef<number | null>(null);
-  const [isMobile, setIsMobile] = useState(false);
-  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [src, setSrc] = useState<string>("/video/bg.mp4");
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    const mobile =
-      typeof window !== "undefined" &&
-      (window.matchMedia("(hover: none) and (pointer: coarse)").matches ||
-        /iPhone|iPad|iPod|Android/i.test(navigator.userAgent));
-    setIsMobile(mobile);
-  }, []);
-
-  useEffect(() => {
-    if (isMobile) return;
     let cancelled = false;
+    let createdUrl: string | null = null;
     fetch("/video/bg.mp4")
       .then((r) => r.blob())
       .then((b) => {
         if (cancelled) return;
-        setBlobUrl(URL.createObjectURL(b));
+        createdUrl = URL.createObjectURL(b);
+        setSrc(createdUrl);
       })
       .catch(() => {});
     return () => {
       cancelled = true;
+      if (createdUrl) URL.revokeObjectURL(createdUrl);
     };
-  }, [isMobile]);
+  }, []);
 
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
 
-    if (isMobile) {
-      video.loop = true;
-      video.muted = true;
-      video.play().catch(() => {});
-      return;
-    }
-
-    video.pause();
+    const unlock = () => {
+      video.play().then(() => video.pause()).catch(() => {});
+      window.removeEventListener("touchstart", unlock);
+      window.removeEventListener("click", unlock);
+    };
+    window.addEventListener("touchstart", unlock, { once: true, passive: true });
+    window.addEventListener("click", unlock, { once: true });
 
     const tick = () => {
       const v = videoRef.current;
-      if (!v || !v.duration) {
+      if (!v || !v.duration || isNaN(v.duration)) {
         rafRef.current = requestAnimationFrame(tick);
         return;
       }
       const current = v.currentTime;
       const target = targetTimeRef.current;
       const diff = target - current;
-      if (Math.abs(diff) > 0.01) {
+      if (Math.abs(diff) > 0.02) {
         try {
-          v.currentTime = current + diff * 0.1;
+          v.currentTime = current + diff * 0.15;
         } catch {}
       }
       rafRef.current = requestAnimationFrame(tick);
@@ -64,33 +57,36 @@ export default function ScrollVideo() {
 
     const onScroll = () => {
       const v = videoRef.current;
-      if (!v || !v.duration) return;
-      const scrollTop = window.scrollY;
+      if (!v || !v.duration || isNaN(v.duration)) return;
+      const scrollTop = window.scrollY || window.pageYOffset;
       const max = document.documentElement.scrollHeight - window.innerHeight;
       const progress = max > 0 ? Math.min(1, Math.max(0, scrollTop / max)) : 0;
       targetTimeRef.current = progress * v.duration;
     };
 
     const onLoaded = () => {
+      setReady(true);
       onScroll();
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       rafRef.current = requestAnimationFrame(tick);
     };
 
-    if (video.readyState >= 1) onLoaded();
+    if (video.readyState >= 1 && video.duration) onLoaded();
     video.addEventListener("loadedmetadata", onLoaded);
+    video.addEventListener("canplay", onLoaded);
     window.addEventListener("scroll", onScroll, { passive: true });
     window.addEventListener("resize", onScroll);
 
     return () => {
       window.removeEventListener("scroll", onScroll);
       window.removeEventListener("resize", onScroll);
+      window.removeEventListener("touchstart", unlock);
+      window.removeEventListener("click", unlock);
       video.removeEventListener("loadedmetadata", onLoaded);
+      video.removeEventListener("canplay", onLoaded);
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
     };
-  }, [isMobile, blobUrl]);
-
-  const src = !isMobile && blobUrl ? blobUrl : "/video/bg.mp4";
+  }, [src]);
 
   return (
     <div className="fixed inset-0 -z-10 bg-black overflow-hidden">
@@ -99,11 +95,15 @@ export default function ScrollVideo() {
         src={src}
         muted
         playsInline
-        autoPlay={isMobile}
-        loop={isMobile}
+        // @ts-expect-error - iOS-specific attribute
+        webkit-playsinline="true"
         preload="auto"
+        autoPlay
         disablePictureInPicture
-        className="absolute inset-0 w-full h-full object-cover object-center"
+        crossOrigin="anonymous"
+        className={`absolute inset-0 w-full h-full object-cover object-center transition-opacity duration-500 ${
+          ready ? "opacity-100" : "opacity-0"
+        }`}
       />
       <div className="absolute inset-0 bg-black/40" />
     </div>
